@@ -10,13 +10,13 @@ from tensorboardX import SummaryWriter
 
 import torchvision.utils as vutils
 
-import gym
-import gym.spaces
+import gymnasium
+import gymnasium.spaces
 
 import numpy as np
 
-log = gym.logger
-log.set_level(gym.logger.INFO)
+log = gymnasium.logger
+log.set_level(gymnasium.logger.INFO)
 
 LATENT_VECTOR_SIZE = 100
 DISCR_FILTERS = 64
@@ -31,7 +31,7 @@ REPORT_EVERY_ITER = 100
 SAVE_IMAGE_EVERY_ITER = 1000
 
 
-class InputWrapper(gym.ObservationWrapper):
+class InputWrapper(gymnasium.ObservationWrapper):
     """
     Preprocessing of input numpy array:
     1. resize image into predefined size
@@ -39,9 +39,9 @@ class InputWrapper(gym.ObservationWrapper):
     """
     def __init__(self, *args):
         super(InputWrapper, self).__init__(*args)
-        assert isinstance(self.observation_space, gym.spaces.Box)
+        assert isinstance(self.observation_space, gymnasium.spaces.Box)
         old_space = self.observation_space
-        self.observation_space = gym.spaces.Box(self.observation(old_space.low), self.observation(old_space.high),
+        self.observation_space = gymnasium.spaces.Box(self.observation(old_space.low), self.observation(old_space.high),
                                                 dtype=np.float32)
 
     def observation(self, observation):
@@ -113,21 +113,21 @@ class Generator(nn.Module):
 
 
 def iterate_batches(envs, batch_size=BATCH_SIZE):
-    batch = [e.reset() for e in envs]
+    batch = [e.reset()[0] for e in envs]
     env_gen = iter(lambda: random.choice(envs), None)
 
     while True:
         e = next(env_gen)
-        obs, reward, is_done, _ = e.step(e.action_space.sample())
-        if np.mean(obs) > 0.01:
-            batch.append(obs)
+        observation, reward, terminated, truncated, info = e.step(e.action_space.sample())
+        if np.mean(observation) > 0.01:
+            batch.append(observation)
         if len(batch) == batch_size:
             # Normalising input between -1 to 1
             batch_np = np.array(batch, dtype=np.float32) * 2.0 / 255.0 - 1.0
             yield torch.tensor(batch_np)
             batch.clear()
-        if is_done:
-            e.reset()
+        if terminated or truncated:
+            observation, info = e.reset()
 
 
 if __name__ == "__main__":
@@ -136,7 +136,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     device = torch.device("cuda" if args.cuda else "cpu")
-    envs = [InputWrapper(gym.make(name)) for name in ('Breakout-v0', 'AirRaid-v0', 'Pong-v0')]
+    envs = [("GymV26Environment-v0", "ALE/Breakout-v5"),
+            ("GymV26Environment-v0", "ALE/AirRaid-v5"),
+            ("GymV26Environment-v0", "ALE/Pong-v5"),
+            ]
+    envs = [InputWrapper(gymnasium.make(name, env_id=env_id)) for name, env_id in envs]
     input_shape = envs[0].observation_space.shape
 
     net_discr = Discriminator(input_shape=input_shape).to(device)

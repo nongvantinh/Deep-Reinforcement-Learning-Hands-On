@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import gymnasium, gymnasium.spaces
+import gym, gym.spaces
 from collections import namedtuple
 import numpy as np
 from tensorboardX import SummaryWriter
@@ -8,23 +8,25 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-
 HIDDEN_SIZE = 128
 BATCH_SIZE = 16
 PERCENTILE = 70
 
+# Move the initialization of the device after importing torch
+import torch.cuda
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
 
-class DiscreteOneHotWrapper(gymnasium.ObservationWrapper):
+class DiscreteOneHotWrapper(gym.ObservationWrapper):
     def __init__(self, env):
         super(DiscreteOneHotWrapper, self).__init__(env)
-        assert isinstance(env.observation_space, gymnasium.spaces.Discrete)
-        self.observation_space = gymnasium.spaces.Box(0.0, 1.0, (env.observation_space.n, ), dtype=np.float32)
+        assert isinstance(env.observation_space, gym.spaces.Discrete)
+        self.observation_space = gym.spaces.Box(0.0, 1.0, (env.observation_space.n, ), dtype=np.float32)
 
     def observation(self, observation):
         res = np.copy(self.observation_space.low)
         res[observation] = 1.0
         return res
-
 
 class Net(nn.Module):
     def __init__(self, obs_size, hidden_size, n_actions):
@@ -34,14 +36,16 @@ class Net(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_size, n_actions)
         )
+        # Move the network to the GPU if available
+        self.net = self.net.to(device)
 
     def forward(self, x):
+        # Ensure that the input tensor x is on the same device as the network
+        x = x.to(self.net[0].weight.device)
         return self.net(x)
-
 
 Episode = namedtuple('Episode', field_names=['reward', 'steps'])
 EpisodeStep = namedtuple('EpisodeStep', field_names=['observation', 'action'])
-
 
 def iterate_batches(env, net, batch_size):
     batch = []
@@ -52,7 +56,7 @@ def iterate_batches(env, net, batch_size):
     while True:
         obs_v = torch.FloatTensor([observation])
         act_probs_v = sm(net(obs_v))
-        act_probs = act_probs_v.data.numpy()[0]
+        act_probs = act_probs_v.cpu().data.numpy()[0]
         action = np.random.choice(len(act_probs), p=act_probs)
         next_observation, reward, terminated, truncated, info = env.step(action)
         episode_reward += reward
@@ -66,7 +70,6 @@ def iterate_batches(env, net, batch_size):
                 yield batch
                 batch = []
         observation = next_observation
-
 
 def filter_batch(batch, percentile):
     rewards = list(map(lambda s: s.reward, batch))
@@ -85,20 +88,21 @@ def filter_batch(batch, percentile):
     train_act_v = torch.LongTensor(train_act)
     return train_obs_v, train_act_v, reward_bound, reward_mean
 
-
 if __name__ == "__main__":
-    env = DiscreteOneHotWrapper(gymnasium.make("FrozenLake-v1", render_mode="human"))
-    # env = gymnasium.wrappers.Monitor(env, directory="mon", force=True)
+    env = DiscreteOneHotWrapper(gym.make("FrozenLake-v1", render_mode="human"))
     obs_size = env.observation_space.shape[0]
     n_actions = env.action_space.n
 
-    net = Net(obs_size, HIDDEN_SIZE, n_actions)
+    net = Net(obs_size, HIDDEN_SIZE, n_actions).to(device)
     objective = nn.CrossEntropyLoss()
     optimizer = optim.Adam(params=net.parameters(), lr=0.01)
     writer = SummaryWriter(comment="-frozenlake-naive")
 
     for iter_no, batch in enumerate(iterate_batches(env, net, BATCH_SIZE)):
         obs_v, acts_v, reward_b, reward_m = filter_batch(batch, PERCENTILE)
+        obs_v = obs_v.to(device)
+        acts_v = acts_v.to(device)
+
         optimizer.zero_grad()
         action_scores_v = net(obs_v)
         loss_v = objective(action_scores_v, acts_v)

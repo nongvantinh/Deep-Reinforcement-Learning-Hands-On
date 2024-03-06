@@ -1,9 +1,9 @@
-import gym
+import gymnasium
 
 import random
 
 
-class RandomActionWrapper(gym.ActionWrapper):
+class RandomActionWrapper(gymnasium.ActionWrapper):
     def __init__(self, env, epsilon=0.1):
         super(RandomActionWrapper, self).__init__(env)
         self.epsilon = epsilon
@@ -16,15 +16,15 @@ class RandomActionWrapper(gym.ActionWrapper):
 
 
 if __name__ == "__main__":
-    env = RandomActionWrapper(gym.make("CartPole-v0"))
+    env = RandomActionWrapper(gymnasium.make("CartPole-v0", render_mode="human"))
 
-    obs = env.reset()
+    observation, info = env.reset()
     total_reward = 0.0
 
     while True:
-        obs, reward, done, _ = env.step(0)
+        observation, reward, terminated, truncated, info = env.step(0)
         total_reward += reward
-        if done:
+        if terminated or truncated:
             break
 
     print("Reward got: %.2f" % total_reward)
