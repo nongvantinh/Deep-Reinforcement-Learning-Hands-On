@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import gym
+import gymnasium
 from collections import namedtuple
 import numpy as np
 from tensorboardX import SummaryWriter
@@ -30,30 +30,29 @@ class Net(nn.Module):
 Episode = namedtuple('Episode', field_names=['reward', 'steps'])
 EpisodeStep = namedtuple('EpisodeStep', field_names=['observation', 'action'])
 
-
 def iterate_batches(env, net, batch_size):
     batch = []
     episode_reward = 0.0
     episode_steps = []
-    obs = env.reset()
+    observation, info = env.reset()
     sm = nn.Softmax(dim=1)
     while True:
-        obs_v = torch.FloatTensor([obs])
+        obs_v = torch.FloatTensor([observation])
         act_probs_v = sm(net(obs_v))
         act_probs = act_probs_v.data.numpy()[0]
         action = np.random.choice(len(act_probs), p=act_probs)
-        next_obs, reward, is_done, _ = env.step(action)
+        next_observation, reward, terminated, truncated, info = env.step(action)
         episode_reward += reward
-        episode_steps.append(EpisodeStep(observation=obs, action=action))
-        if is_done:
+        episode_steps.append(EpisodeStep(observation=observation, action=action))
+        if terminated or truncated:
             batch.append(Episode(reward=episode_reward, steps=episode_steps))
             episode_reward = 0.0
             episode_steps = []
-            next_obs = env.reset()
+            next_observation, info = env.reset()
             if len(batch) == batch_size:
                 yield batch
                 batch = []
-        obs = next_obs
+        observation = next_observation
 
 
 def filter_batch(batch, percentile):
@@ -75,11 +74,11 @@ def filter_batch(batch, percentile):
 
 
 if __name__ == "__main__":
-    env = gym.make("CartPole-v0")
-    # env = gym.wrappers.Monitor(env, directory="mon", force=True)
+    env = gymnasium.make("CartPole-v1", render_mode="human")
+    # env = gymnasium.wrappers.Monitor(env, directory="mon", force=True)
     obs_size = env.observation_space.shape[0]
     n_actions = env.action_space.n
-
+    
     net = Net(obs_size, HIDDEN_SIZE, n_actions)
     objective = nn.CrossEntropyLoss()
     optimizer = optim.Adam(params=net.parameters(), lr=0.01)
