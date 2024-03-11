@@ -56,7 +56,7 @@ class Agent:
         self._reset()
 
     def _reset(self):
-        self.state = env.reset()
+        self.state = env.reset()[0]
         self.total_reward = 0.0
 
     def play_step(self, net, epsilon=0.0, device="cpu"):
@@ -72,13 +72,13 @@ class Agent:
             action = int(act_v.item())
 
         # do step in the environment
-        new_state, reward, is_done, _ = self.env.step(action)
+        new_state, reward, terminated, truncated, _ = self.env.step(action)
         self.total_reward += reward
 
-        exp = Experience(self.state, action, reward, is_done, new_state)
+        exp = Experience(self.state, action, reward, terminated or truncated, new_state)
         self.exp_buffer.append(exp)
         self.state = new_state
-        if is_done:
+        if terminated or truncated:
             done_reward = self.total_reward
             self._reset()
         return done_reward
@@ -91,9 +91,9 @@ def calc_loss(batch, net, tgt_net, device="cpu"):
     next_states_v = torch.tensor(next_states).to(device)
     actions_v = torch.tensor(actions).to(device)
     rewards_v = torch.tensor(rewards).to(device)
-    done_mask = torch.ByteTensor(dones).to(device)
+    done_mask = torch.BoolTensor(dones).to(device)
 
-    state_action_values = net(states_v).gather(1, actions_v.unsqueeze(-1)).squeeze(-1)
+    state_action_values = net(states_v).gather(1, actions_v.unsqueeze(-1).to(torch.int64)).squeeze(-1)
     next_state_values = tgt_net(next_states_v).max(1)[0]
     next_state_values[done_mask] = 0.0
     next_state_values = next_state_values.detach()
@@ -104,13 +104,12 @@ def calc_loss(batch, net, tgt_net, device="cpu"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cuda", default=False, action="store_true", help="Enable cuda")
     parser.add_argument("--env", default=DEFAULT_ENV_NAME,
                         help="Name of the environment, default=" + DEFAULT_ENV_NAME)
     parser.add_argument("--reward", type=float, default=MEAN_REWARD_BOUND,
                         help="Mean reward boundary for stop of training, default=%.2f" % MEAN_REWARD_BOUND)
     args = parser.parse_args()
-    device = torch.device("cuda" if args.cuda else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     env = wrappers.make_env(args.env)
 

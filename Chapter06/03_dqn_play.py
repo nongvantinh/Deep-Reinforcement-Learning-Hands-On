@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import gym
+import gymnasium
 import time
 import argparse
 import numpy as np
@@ -27,11 +27,11 @@ if __name__ == "__main__":
 
     env = wrappers.make_env(args.env)
     if args.record:
-        env = gym.wrappers.Monitor(env, args.record)
+        env = gymnasium.wrappers.Monitor(env, args.record)
     net = dqn_model.DQN(env.observation_space.shape, env.action_space.n)
     net.load_state_dict(torch.load(args.model, map_location=lambda storage, loc: storage))
 
-    state = env.reset()
+    state, info = env.reset()
     total_reward = 0.0
     c = collections.Counter()
 
@@ -43,9 +43,9 @@ if __name__ == "__main__":
         q_vals = net(state_v).data.numpy()[0]
         action = np.argmax(q_vals)
         c[action] += 1
-        state, reward, done, _ = env.step(action)
+        state, reward, terminated, truncated, _ = env.step(action)
         total_reward += reward
-        if done:
+        if terminated or truncated:
             break
         if args.visualize:
             delta = 1/FPS - (time.time() - start_ts)
